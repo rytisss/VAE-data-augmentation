@@ -4,6 +4,7 @@ from RoadPavementSegmentation.models.losses import *
 import tensorflow.keras.backend as keras
 
 import numpy as np
+import os
 from matplotlib import pyplot as plt
 
 import tensorflow as tf
@@ -57,7 +58,21 @@ def encoder(input_size = (320,320),
     # Define model output, reduce output dimentions
     encoder_output = Dense(number_of_output_neurons, name='encoder_output')(reduces_assp_flatten)
 
-    return encoder_output, shape_before_flattening
+    mean_mu = Dense(number_of_output_neurons, name='mu')(encoder_output)
+    log_var = Dense(number_of_output_neurons, name='log_var')(encoder_output)
+
+    # Defining a function for sampling
+    def sampling(args):
+        mean_mu, log_var = args
+        epsilon = K.random_normal(shape=K.shape(mean_mu), mean=0., stddev=1.)
+        return mean_mu + K.exp(log_var / 2) * epsilon
+
+        # Using a Keras Lambda Layer to include the sampling function as a layer
+        # in the model
+
+    encoder_output = Lambda(sampling, name='encoder_output')([mean_mu, log_var])
+
+    return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening, Model(encoder_input, encoder_output)
 
 
 def decoder(input, input_shape_before_flatten, number_of_kernels, batch_norm, kernel_size):
@@ -84,9 +99,11 @@ def decoder(input, input_shape_before_flatten, number_of_kernels, batch_norm, ke
         dec0 = BatchNormalization()(dec0)
     dec0 = Activation('relu')(dec0)
 
-    outputs = Conv2D(1, (1, 1), padding="same", activation="sigmoid", kernel_initializer='glorot_normal')(dec0)
-    return outputs
+    decoder_output = Conv2D(1, (1, 1), padding="same", activation="sigmoid", kernel_initializer='glorot_normal')(dec0)
+    return decoder_input, decoder_output, Model(decoder_input, decoder_output)
 
+def r_loss(y_true, y_pred):
+    return K.mean(K.square(y_true - y_pred), axis = [1,2,3])
 
 class CustomSaver(tf.keras.callbacks.Callback):
     def __init__(self):
@@ -114,8 +131,20 @@ def train():
     # number_of_epoch. How many epoch you want to train?
     number_of_epoch = 16
 
-    # Define model
-    model = UNet4_res_aspp_First5x5_CoordConv(number_of_kernels=16,input_size = (320,320,1), loss_function = Loss.CROSSENTROPY50DICE50, learning_rate=1e-3)
+    vae_encoder_input, vae_encoder_output, mean_mu, log_var, vae_shape_before_flattening, vae_encoder = encoder()
+    vae_decoder_input, vae_decoder_output, vae_decoder = decoder()
+
+    LOSS_FACTOR = 10000
+
+    def kl_loss(y_true, y_pred):
+        kl_loss = -0.5 * K.sum(1 + log_var - K.square(mean_mu) - K.exp(log_var), axis=1)
+        return kl_loss
+
+    def total_loss(y_true, y_pred):
+        return LOSS_FACTOR * r_loss(y_true, y_pred) + kl_loss(y_true, y_pred)
+
+    # define full vae
+
 
     # Where is your data?
     # This path should point to directory with folders 'Images' and 'Labels'
