@@ -1,6 +1,7 @@
 from RoadPavementSegmentation.models.layers import *
 from RoadPavementSegmentation.models.customLayers import *
 from RoadPavementSegmentation.models.losses import *
+from RoadPavementSegmentation.models.utilities import *
 import tensorflow.keras.backend as keras
 
 import numpy as np
@@ -19,10 +20,12 @@ from keras import backend as K
 weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
 weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 
+# https://towardsdatascience.com/generating-new-faces-with-variational-autoencoders-d13cfcb5f0a8
+
 # Encoder
 # Returns flattened encoder data and tensor shape before flattening
 
-def encoder(input_size = (320,320),
+def encoder(input_size = (320,320,1),
             number_of_kernels = 16,
             kernel_size = 3,
             stride = 1,
@@ -144,12 +147,12 @@ def train():
         return LOSS_FACTOR * r_loss(y_true, y_pred) + kl_loss(y_true, y_pred)
 
     # define full vae
-
-
+    vae_model = Model(vae_encoder_input, vae_decoder_output)
+    vae_model.compile(optimizer=Adam(lr = 0.001), loss=total_loss, metrics=[r_loss, kl_loss])
     # Where is your data?
     # This path should point to directory with folders 'Images' and 'Labels'
     # In each of mentioned folders should be image and annotations respectively
-    data_dir = r'D:\drilled holes data for training/'
+    data_dir = r'D:\holesTrain_\Image_rois/'
 
     # Possible 'on-the-flight' augmentation parameters
     data_gen_args = dict(rotation_range=0.0,
@@ -161,7 +164,13 @@ def train():
                          fill_mode='nearest')
 
     # Define data generator that will take images from directory
-    generator = trainGenerator(batch_size, data_dir, 'images', 'labels', data_gen_args, save_to_dir = None, target_size = (320,320))
+    data_flow = ImageDataGenerator(rescale=1. / 255).flow_from_directory(data_dir,
+                                                                         target_size=(320,320),
+                                                                         batch_size=batch_size,
+                                                                         shuffle=True,
+                                                                         class_mode='input',
+                                                                         subset='training'
+                                                                         )
 
     if not os.path.exists(weights_output_dir):
         print('Output directory doesnt exist!\n')
@@ -176,7 +185,7 @@ def train():
     learning_rate_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
     # Make checkpoint for saving each
     model_checkpoint = tf.keras.callbacks.ModelCheckpoint(weights_name, monitor='loss',verbose=1, save_best_only=False, save_weights_only=False)
-    model.fit_generator(generator,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver, learning_rate_scheduler], shuffle = True)
+    vae_model.fit_generator(data_flow,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver, learning_rate_scheduler], shuffle = True)
 
 def main():
     train()
