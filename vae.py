@@ -18,107 +18,74 @@ from keras import backend as K
 weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
 weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 
-# part of the code from https://github.com/HenningBuhl/VQ-VAE_Keras_Implementation/blob/master/VQ_VAE_Keras_MNIST_Example.ipynb
+# Encoder
+# Returns flattened encoder data and tensor shape before flattening
 
-# VQ layer.
-class VQVAELayer(Layer):
-    def __init__(self, embedding_dim, num_embeddings, commitment_cost,
-                 initializer='uniform', epsilon=1e-10, **kwargs):
-        self.embedding_dim = embedding_dim
-        self.num_embeddings = num_embeddings
-        self.commitment_cost = commitment_cost
-        self.initializer = initializer
-        super(VQVAELayer, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        # Add embedding weights.
-        self.w = self.add_weight(name='embedding',
-                                 shape=(self.embedding_dim, self.num_embeddings),
-                                 initializer=self.initializer,
-                                 trainable=True)
-
-        # Finalize building.
-        super(VQVAELayer, self).build(input_shape)
-
-    def call(self, x):
-        # Flatten input except for last dimension.
-        flat_inputs = K.reshape(x, (-1, self.embedding_dim))
-
-        # Calculate distances of input to embedding vectors.
-        distances = (K.sum(flat_inputs ** 2, axis=1, keepdims=True)
-                     - 2 * K.dot(flat_inputs, self.w)
-                     + K.sum(self.w ** 2, axis=0, keepdims=True))
-
-        # Retrieve encoding indices.
-        encoding_indices = K.argmax(-distances, axis=1)
-        encodings = K.one_hot(encoding_indices, self.num_embeddings)
-        encoding_indices = K.reshape(encoding_indices, K.shape(x)[:-1])
-        quantized = self.quantize(encoding_indices)
-
-        # Metrics.
-        # avg_probs = K.mean(encodings, axis=0)
-        # perplexity = K.exp(- K.sum(avg_probs * K.log(avg_probs + epsilon)))
-
-        return quantized
-
-    @property
-    def embeddings(self):
-        return self.w
-
-    def quantize(self, encoding_indices):
-        w = K.transpose(self.embeddings.read_value())
-        return tf.nn.embedding_lookup(w, encoding_indices, validate_indices=False)
-
-#encoder
 def encoder(input_size = (320,320),
             number_of_kernels = 16,
             kernel_size = 3,
             stride = 1,
+            number_of_output_neurons = 2000,
             max_pool = True,
             max_pool_size = 2,
             batch_norm = True):
     # Input
-    inputs = Input(input_size)
+    encoder_input = Input(input_size)
     # encoding
-    _, enc0 = EncodingLayer(inputs, number_of_kernels, 5, stride, max_pool, max_pool_size,
+    _, enc0 = EncodingLayer(encoder_input, number_of_kernels, 5, stride, max_pool, max_pool_size,
                                        batch_norm)
-    _, enc1 = EncodingLayer(enc0, number_of_kernels * 2, kernel_size, stride, max_pool, max_pool_size,
+    _, enc1 = EncodingLayerResAddOp(enc0, number_of_kernels * 2, kernel_size, stride, max_pool, max_pool_size,
                                        batch_norm)
-    _, enc2 = EncodingLayer(enc1, number_of_kernels * 4, kernel_size, stride, max_pool, max_pool_size,
+    _, enc2 = EncodingLayerResAddOp(enc1, number_of_kernels * 4, kernel_size, stride, max_pool, max_pool_size,
                                        batch_norm)
-    _, enc3 = EncodingLayer(enc2, number_of_kernels * 8, kernel_size, stride, False, max_pool_size,
+    _, enc3 = EncodingLayerResAddOp(enc2, number_of_kernels * 8, kernel_size, stride, False, max_pool_size,
                             batch_norm)
     assp = AtrousSpatialPyramidPool(enc3, number_of_kernels * 8, kernel_size)
 
+    # reduce dimensions, because in this case when input is 320x320 with 16kernels, here will be tensor with dimension of 204800
+    reduced_assp = Conv2D(number_of_kernels, kernel_size=(kernel_size, kernel_size), strides=1, padding='same',
+                  kernel_initializer='he_normal')(assp)
+    if batch_norm == True:
+        reduced_assp = BatchNormalization()(reduced_assp)
+    reduced_assp = Activation('relu')(reduced_assp)
 
-# Calculate vq-vae loss.
-def vq_vae_loss_wrapper(data_variance, commitment_cost, quantized, x_inputs):
-    def vq_vae_loss(x, x_hat):
-        recon_loss = losses.mse(x, x_hat) / data_variance
+    # Required for reshaping latent vector while building Decoder
+    shape_before_flattening = K.int_shape(reduced_assp)[1:]
 
-        e_latent_loss = K.mean((K.stop_gradient(quantized) - x_inputs) ** 2)
-        q_latent_loss = K.mean((quantized - K.stop_gradient(x_inputs)) ** 2)
-        loss = q_latent_loss + commitment_cost * e_latent_loss
+    reduces_assp_flatten = Flatten()(reduced_assp) #in case of input 320x320 with 16 kernels, here should be 25600
 
-        return recon_loss + loss  # * beta
+    # Define model output, reduce output dimentions
+    encoder_output = Dense(number_of_output_neurons, name='encoder_output')(reduces_assp_flatten)
 
-    return vq_vae_loss
+    return encoder_output, shape_before_flattening
 
-# Hyper Parameters.
-epochs = 1000 # MAX
-batch_size = 64
-validation_split = 0.1
 
-# VQ-VAE Hyper Parameters.
-embedding_dim = 32 # Length of embedding vectors.
-num_embeddings = 128 # Number of embedding vectors (high value = high bottleneck capacity).
-commitment_cost = 0.25 # Controls the weighting of the loss terms.
+def decoder(input, input_shape_before_flatten, number_of_kernels, batch_norm, kernel_size):
+    # Define model input
+    decoder_input = Input(shape=(input,), name='decoder_input')
 
-# EarlyStoppingCallback.
-esc = keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=1e-4,
-                                    patience=5, verbose=0, mode='auto',
-                                    baseline=None, restore_best_weights=True)
+    x = Dense(np.prod(input_shape_before_flatten))(decoder_input)
+    x = Reshape(input_shape_before_flatten)(x)
 
+    #increase feature count with 1x1 convolution
+    x = Conv2D(number_of_kernels * 8, kernel_size=(kernel_size, kernel_size), strides=1, padding='same',
+                          kernel_initializer='he_normal')(x)
+    if batch_norm == True:
+        x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+
+    dec2 = DecodingLayer(x, 2, number_of_kernels * 4, kernel_size, batch_norm)
+    dec1 = DecodingLayer(dec2, 2, number_of_kernels * 2, kernel_size, batch_norm)
+    dec0 = DecodingLayer(dec1, 2, number_of_kernels, kernel_size, batch_norm)
+
+    dec0 = Conv2D(2, kernel_size=(kernel_size, kernel_size), strides=1, padding='same', kernel_initializer='he_normal')(
+        dec0)
+    if batch_norm:
+        dec0 = BatchNormalization()(dec0)
+    dec0 = Activation('relu')(dec0)
+
+    outputs = Conv2D(1, (1, 1), padding="same", activation="sigmoid", kernel_initializer='glorot_normal')(dec0)
+    return outputs
 
 
 class CustomSaver(tf.keras.callbacks.Callback):
