@@ -54,11 +54,11 @@ def encoder(input_size = (320, 320, 1),
 
     reduces_assp_flatten = Flatten()(reduced_assp) #in case of input 320x320 with 16 kernels, here should be 25600
 
-    # Define model output, reduce output dimentions
-    encoder_output = Dense(number_of_output_neurons, name='encoder_output')(reduces_assp_flatten)
+    # Define model output, reduce output dimensions
+    reduces_assp_flatten = Dense(number_of_output_neurons)(reduces_assp_flatten)
 
-    mean_mu = Dense(number_of_output_neurons, name='mu')(encoder_output)
-    log_var = Dense(number_of_output_neurons, name='log_var')(encoder_output)
+    mean_mu = Dense(number_of_output_neurons, name='mu')(reduces_assp_flatten)
+    log_var = Dense(number_of_output_neurons, name='log_var')(reduces_assp_flatten)
 
     # Defining a function for sampling
     def sampling(args):
@@ -74,7 +74,7 @@ def encoder(input_size = (320, 320, 1),
     return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening, Model(encoder_input, encoder_output)
 
 
-def decoder(input, input_shape_before_flatten, number_of_kernels, batch_norm, kernel_size):
+def decoder(input = 20, input_shape_before_flatten = (40, 40, 16), number_of_kernels = 16, batch_norm = True, kernel_size = 3):
     # Define model input
     decoder_input = Input(shape=(input,), name='decoder_input')
 
@@ -88,9 +88,9 @@ def decoder(input, input_shape_before_flatten, number_of_kernels, batch_norm, ke
         x = BatchNormalization()(x)
     x = Activation('relu')(x)
 
-    dec2 = DecodingLayer(x, 2, number_of_kernels * 4, kernel_size, batch_norm)
-    dec1 = DecodingLayer(dec2, 2, number_of_kernels * 2, kernel_size, batch_norm)
-    dec0 = DecodingLayer(dec1, 2, number_of_kernels, kernel_size, batch_norm)
+    dec2 = DecodingLayerRes(x, 2, number_of_kernels * 4, kernel_size, batch_norm)
+    dec1 = DecodingLayerRes(dec2, 2, number_of_kernels * 2, kernel_size, batch_norm)
+    dec0 = DecodingLayerRes(dec1, 2, number_of_kernels, kernel_size, batch_norm)
 
     dec0 = Conv2D(2, kernel_size=(kernel_size, kernel_size), strides=1, padding='same', kernel_initializer='he_normal')(
         dec0)
