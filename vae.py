@@ -10,11 +10,11 @@ from matplotlib import pyplot as plt
 
 import tensorflow as tf
 
-from keras.models import Model
-from keras.layers import Input, Layer, Activation, Dense, Flatten, Dropout, Lambda, Conv2D, MaxPooling2D, UpSampling2D, Conv2DTranspose, SpatialDropout2D
-from keras.layers.normalization import BatchNormalization
-from keras import losses
-from keras import backend as K
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Layer, Activation, Dense, Flatten, Dropout, Lambda, Conv2D, MaxPooling2D, UpSampling2D, Conv2DTranspose, SpatialDropout2D
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras import losses
+from tensorflow.keras import backend as K
 
 # Directory for weight saving (creates if it does not exist)
 weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
@@ -25,7 +25,7 @@ weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 # Encoder
 # Returns flattened encoder data and tensor shape before flattening
 
-def encoder(input_size = (320,320,1),
+def encoder(input_size = (320, 320, 1),
             number_of_kernels = 16,
             kernel_size = 3,
             stride = 1,
@@ -36,14 +36,10 @@ def encoder(input_size = (320,320,1),
     # Input
     encoder_input = Input(input_size)
     # encoding
-    _, enc0 = EncodingLayer(encoder_input, number_of_kernels, 5, stride, max_pool, max_pool_size,
-                                       batch_norm)
-    _, enc1 = EncodingLayerResAddOp(enc0, number_of_kernels * 2, kernel_size, stride, max_pool, max_pool_size,
-                                       batch_norm)
-    _, enc2 = EncodingLayerResAddOp(enc1, number_of_kernels * 4, kernel_size, stride, max_pool, max_pool_size,
-                                       batch_norm)
-    _, enc3 = EncodingLayerResAddOp(enc2, number_of_kernels * 8, kernel_size, stride, False, max_pool_size,
-                            batch_norm)
+    _, enc0 = EncodingLayer(encoder_input, number_of_kernels, 5, stride, max_pool, max_pool_size, batch_norm)
+    _, enc1 = EncodingLayerResAddOp(enc0, number_of_kernels * 2, kernel_size, stride, max_pool, max_pool_size, batch_norm)
+    _, enc2 = EncodingLayerResAddOp(enc1, number_of_kernels * 4, kernel_size, stride, max_pool, max_pool_size, batch_norm)
+    _, enc3 = EncodingLayerResAddOp(enc2, number_of_kernels * 8, kernel_size, stride, False, max_pool_size,batch_norm)
     assp = AtrousSpatialPyramidPool(enc3, number_of_kernels * 8, kernel_size)
 
     # reduce dimensions, because in this case when input is 320x320 with 16kernels, here will be tensor with dimension of 204800
