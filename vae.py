@@ -124,7 +124,7 @@ def scheduler(epoch):
 
 def train():
     # how many iterations in one epoch? Should cover whole dataset. Divide number of data samples from batch size
-    number_of_iteration = 26000
+    number_of_iteration = 19000
     # batch size. How many samples you want to feed in one iteration?
     batch_size = 4
     # number_of_epoch. How many epoch you want to train?
@@ -168,7 +168,8 @@ def train():
                                                                          batch_size=batch_size,
                                                                          shuffle=True,
                                                                          class_mode='input',
-                                                                         subset='training'
+                                                                         subset='training',
+                                                                         color_mode = 'grayscale'
                                                                          )
 
     if not os.path.exists(weights_output_dir):
@@ -181,12 +182,13 @@ def train():
     # Custom saving
     saver = CustomSaver()
     # Learning rate scheduler
-    learning_rate_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
+    #learning_rate_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
     # Make checkpoint for saving each
     model_checkpoint = tf.keras.callbacks.ModelCheckpoint(weights_name, monitor='loss',verbose=1, save_best_only=False, save_weights_only=False)
-    vae_model.fit_generator(data_flow,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver, learning_rate_scheduler], shuffle = True)
+    vae_model.fit_generator(data_flow,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver], shuffle = True)
 
 def main():
+    #tf.config.experimental_run_functions_eagerly(True)
     train()
 
 if __name__ == "__main__":
