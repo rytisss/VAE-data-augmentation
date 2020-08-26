@@ -74,7 +74,7 @@ def encoder(input_size = (320, 320, 1),
     return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening, Model(encoder_input, encoder_output)
 
 
-def decoder(input = 20, input_shape_before_flatten = (40, 40, 16), number_of_kernels = 16, batch_norm = True, kernel_size = 3):
+def decoder(input = 2000, input_shape_before_flatten = (40, 40, 16), number_of_kernels = 16, batch_norm = True, kernel_size = 3):
     # Define model input
     decoder_input = Input(shape=(input,), name='decoder_input')
 
@@ -143,7 +143,10 @@ def train():
         return LOSS_FACTOR * r_loss(y_true, y_pred) + kl_loss(y_true, y_pred)
 
     # define full vae
-    vae_model = Model(vae_encoder_input, vae_decoder_output)
+    vae_input = vae_encoder_input
+    vae_output = vae_decoder(vae_encoder_output)
+    vae_model = Model(vae_input, vae_output)
+
     vae_model.compile(optimizer=Adam(lr = 0.001), loss=total_loss, metrics=[r_loss, kl_loss])
     # Where is your data?
     # This path should point to directory with folders 'Images' and 'Labels'
