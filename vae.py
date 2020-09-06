@@ -16,15 +16,41 @@ from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras import losses
 from tensorflow.keras import backend as K
 
+from keras.losses import mse, binary_crossentropy
+
+from keras.utils import plot_model
+
 # Directory for weight saving (creates if it does not exist)
 weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
 weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 
-# https://towardsdatascience.com/generating-new-faces-with-variational-autoencoders-d13cfcb5f0a8
+# https://towardsdatascience.com/variational-autoencoders-vaes-for-dummies-step-by-step-tutorial-69e6d1c9d8e9
+
+# Official sample
+# https://github.com/keras-team/keras/blob/master/examples/variational_autoencoder.py
+
+
+# reparameterization trick
+# instead of sampling from Q(z|X), sample epsilon = N(0,I)
+# z = z_mean + sqrt(var) * epsilon
+def sampling(args):
+    """Reparameterization trick by sampling from an isotropic unit Gaussian.
+    # Arguments
+        args (tensor): mean and log of variance of Q(z|X)
+    # Returns
+        z (tensor): sampled latent vector
+    """
+
+    z_mean, z_log_var = args
+    batch = K.shape(z_mean)[0]
+    dim = K.int_shape(z_mean)[1]
+    # by default, random_normal has mean = 0 and std = 1.0
+    epsilon = K.random_normal(shape=(batch, dim))
+    return z_mean + K.exp(0.5 * z_log_var) * epsilon
+
 
 # Encoder
 # Returns flattened encoder data and tensor shape before flattening
-
 def encoder(input_size = (320, 320, 1),
             number_of_kernels = 16,
             kernel_size = 3,
@@ -60,18 +86,9 @@ def encoder(input_size = (320, 320, 1),
     mean_mu = Dense(number_of_output_neurons, name='mu')(reduces_assp_flatten)
     log_var = Dense(number_of_output_neurons, name='log_var')(reduces_assp_flatten)
 
-    # Defining a function for sampling
-    def sampling(args):
-        mean_mu, log_var = args
-        epsilon = K.random_normal(shape=K.shape(mean_mu), mean=0., stddev=1.)
-        return mean_mu + K.exp(log_var / 2) * epsilon
+    encoder_output = Lambda(sampling)([mean_mu, log_var])
 
-        # Using a Keras Lambda Layer to include the sampling function as a layer
-        # in the model
-
-    encoder_output = Lambda(sampling, name='encoder_output')([mean_mu, log_var])
-
-    return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening, Model(encoder_input, encoder_output)
+    return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening
 
 
 def decoder(input = 2000, input_shape_before_flatten = (40, 40, 16), number_of_kernels = 16, batch_norm = True, kernel_size = 3):
@@ -99,7 +116,7 @@ def decoder(input = 2000, input_shape_before_flatten = (40, 40, 16), number_of_k
     dec0 = Activation('relu')(dec0)
 
     decoder_output = Conv2D(1, (1, 1), padding="same", activation="sigmoid", kernel_initializer='glorot_normal')(dec0)
-    return decoder_input, decoder_output, Model(decoder_input, decoder_output)
+    return decoder_input, decoder_output
 
 def r_loss(y_true, y_pred):
     return K.mean(K.square(y_true - y_pred), axis = [1,2,3])
@@ -122,36 +139,42 @@ def scheduler(epoch):
     print('Epoch: ' + str(epoch) + ', learning rate = ' + str(lr))
     return lr
 
+LOSS_FACTOR = 2000
+
 def train():
     # how many iterations in one epoch? Should cover whole dataset. Divide number of data samples from batch size
     number_of_iteration = 19000
     # batch size. How many samples you want to feed in one iteration?
-    batch_size = 4
+    batch_size = 1
     # number_of_epoch. How many epoch you want to train?
     number_of_epoch = 16
 
-    vae_encoder_input, vae_encoder_output, mean_mu, log_var, vae_shape_before_flattening, vae_encoder = encoder()
-    vae_decoder_input, vae_decoder_output, vae_decoder = decoder()
-
-    LOSS_FACTOR = 10000
-
-    def kl_loss(y_true, y_pred):
-        kl_loss = -0.5 * K.sum(1 + log_var - K.square(mean_mu) - K.exp(log_var), axis=1)
-        return kl_loss
-
-    def total_loss(y_true, y_pred):
-        return LOSS_FACTOR * r_loss(y_true, y_pred) + kl_loss(y_true, y_pred)
+    vae_encoder_input, vae_encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder()
+    encoder_model = Model(vae_encoder_input, [mean_mu, log_var, vae_encoder_output], name = "encoder")
+    vae_decoder_input, vae_decoder_output = decoder()
+    decoder_model = Model(vae_decoder_input, vae_decoder_output)
 
     # define full vae
     vae_input = vae_encoder_input
-    vae_output = vae_decoder(vae_encoder_output)
+    vae_output = decoder_model(encoder_model(vae_encoder_input)[2])
     vae_model = Model(vae_input, vae_output)
 
-    vae_model.compile(optimizer=Adam(lr = 0.001), loss=total_loss, metrics=[r_loss, kl_loss])
+    kl_loss = -0.5 * K.sum(1 + log_var - K.square(mean_mu) - K.exp(log_var), axis=-1)
+    reconstruction_loss = binary_crossentropy(vae_input,
+                                              vae_output)
+
+    total_loss = K.mean(LOSS_FACTOR * reconstruction_loss + kl_loss)
+    vae_model.add_loss(total_loss)
+    vae_model.compile(optimizer=Adam(lr = 0.001))
+
+    #tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
+    #https://github.com/AppliedDataSciencePartners/DeepReinforcementLearning/issues/3
+
     # Where is your data?
     # This path should point to directory with folders 'Images' and 'Labels'
     # In each of mentioned folders should be image and annotations respectively
-    data_dir = r'D:\holesTrain_\Image_rois/'
+    data_dir = r'D:\holesTrain_/'
+    image_folder = 'Image_rois'
 
     # Possible 'on-the-flight' augmentation parameters
     data_gen_args = dict(rotation_range=0.0,
@@ -167,7 +190,8 @@ def train():
                                                                          target_size=(320,320),
                                                                          batch_size=batch_size,
                                                                          shuffle=True,
-                                                                         class_mode='input',
+                                                                         class_mode=None,
+                                                                         classes= [image_folder],
                                                                          subset='training',
                                                                          color_mode = 'grayscale'
                                                                          )
@@ -188,7 +212,7 @@ def train():
     vae_model.fit_generator(data_flow,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver], shuffle = True)
 
 def main():
-    #tf.config.experimental_run_functions_eagerly(True)
+    tf.config.experimental_run_functions_eagerly(True)
     train()
 
 if __name__ == "__main__":
