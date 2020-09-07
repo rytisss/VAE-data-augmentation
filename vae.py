@@ -116,6 +116,7 @@ def decoder(input = 2000, input_shape_before_flatten = (40, 40, 16), number_of_k
     dec0 = Activation('relu')(dec0)
 
     decoder_output = Conv2D(1, (1, 1), padding="same", activation="sigmoid", kernel_initializer='glorot_normal')(dec0)
+
     return decoder_input, decoder_output
 
 def r_loss(y_true, y_pred):
@@ -149,18 +150,16 @@ def train():
     # number_of_epoch. How many epoch you want to train?
     number_of_epoch = 16
 
-    vae_encoder_input, vae_encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder()
-    encoder_model = Model(vae_encoder_input, [mean_mu, log_var, vae_encoder_output], name = "encoder")
-    vae_decoder_input, vae_decoder_output = decoder()
-    decoder_model = Model(vae_decoder_input, vae_decoder_output)
+    encoder_input, encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder()
+    encoder_model = Model(encoder_input, [mean_mu, log_var, encoder_output], name = "encoder")
+    decoder_input, decoder_output = decoder()
+    decoder_model = Model(decoder_input, decoder_output)
 
     # define full vae
-    vae_input = vae_encoder_input
-    vae_output = decoder_model(encoder_model(vae_encoder_input)[2])
-    vae_model = Model(vae_input, vae_output)
+    vae_output = decoder_model(encoder_model(encoder_input))
+    vae_model = Model(encoder_input, vae_output)
 
-    kl_loss = -0.5 * K.sum(1 + log_var - K.square(mean_mu) - K.exp(log_var), axis=-1)
-    reconstruction_loss = binary_crossentropy(vae_input,
+    reconstruction_loss = binary_crossentropy(encoder_input,
                                               vae_output)
 
     #encoder_model.compile(optimizer=Adam(lr = 0.001), loss = 'binary_crossentropy')
@@ -169,9 +168,13 @@ def train():
     #decoder_model.compile(optimizer=Adam(lr=0.001), loss='binary_crossentropy')
     #tf.keras.utils.plot_model(decoder_model, to_file='decoder.png', show_shapes=True, show_layer_names=True)
 
-    total_loss = K.mean(LOSS_FACTOR * reconstruction_loss + kl_loss)
-    vae_model.add_loss(total_loss)
-    vae_model.compile(optimizer=Adam(lr = 0.001))
+    reconstruction_loss *= LOSS_FACTOR
+    kl_loss = 1 + log_var - K.square(mean_mu) - K.exp(log_var)
+    kl_loss = K.sum(kl_loss, axis=-1)
+    kl_loss *= -0.5
+    vae_loss = K.mean(reconstruction_loss + kl_loss)
+    vae_model.add_loss(vae_loss)
+    vae_model.compile(optimizer=Adam(lr = 1.0))
 
     #tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
     #https://github.com/AppliedDataSciencePartners/DeepReinforcementLearning/issues/3
@@ -192,15 +195,8 @@ def train():
                          fill_mode='nearest')
 
     # Define data generator that will take images from directory
-    data_flow = ImageDataGenerator(rescale=1. / 255).flow_from_directory(data_dir,
-                                                                         target_size=(320,320),
-                                                                         batch_size=batch_size,
-                                                                         shuffle=True,
-                                                                         class_mode=None,
-                                                                         classes= [image_folder],
-                                                                         subset='training',
-                                                                         color_mode = 'grayscale'
-                                                                         )
+    generator = trainGenerator(batch_size, data_dir, 'Image_rois', 'Label_rois', data_gen_args, save_to_dir=None,
+                               target_size=(320, 320))
 
     if not os.path.exists(weights_output_dir):
         print('Output directory doesnt exist!\n')
@@ -215,7 +211,7 @@ def train():
     #learning_rate_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
     # Make checkpoint for saving each
     model_checkpoint = tf.keras.callbacks.ModelCheckpoint(weights_name, monitor='loss',verbose=1, save_best_only=False, save_weights_only=False)
-    vae_model.fit_generator(data_flow,steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver], shuffle = True)
+    vae_model.fit_generator(generator, steps_per_epoch=number_of_iteration,epochs=number_of_epoch,callbacks=[model_checkpoint, saver], shuffle = True)
 
 def main():
     tf.config.experimental_run_functions_eagerly(True)
