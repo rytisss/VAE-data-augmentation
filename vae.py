@@ -163,6 +163,12 @@ def train():
     reconstruction_loss = binary_crossentropy(vae_input,
                                               vae_output)
 
+    #encoder_model.compile(optimizer=Adam(lr = 0.001), loss = 'binary_crossentropy')
+    #tf.keras.utils.plot_model(encoder_model, to_file='encoder.png', show_shapes=True, show_layer_names=True)
+
+    #decoder_model.compile(optimizer=Adam(lr=0.001), loss='binary_crossentropy')
+    #tf.keras.utils.plot_model(decoder_model, to_file='decoder.png', show_shapes=True, show_layer_names=True)
+
     total_loss = K.mean(LOSS_FACTOR * reconstruction_loss + kl_loss)
     vae_model.add_loss(total_loss)
     vae_model.compile(optimizer=Adam(lr = 0.001))
