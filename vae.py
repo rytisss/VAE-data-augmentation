@@ -24,7 +24,7 @@ from keras.utils import plot_model
 weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
 weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 
-# https://towardsdatascience.com/variational-autoencoders-vaes-for-dummies-step-by-step-tutorial-69e6d1c9d8e9
+# https://www.machinecurve.com/index.php/2019/12/30/how-to-create-a-variational-autoencoder-with-keras/
 
 # Official sample
 # https://github.com/keras-team/keras/blob/master/examples/variational_autoencoder.py
@@ -150,7 +150,7 @@ def train():
     # number_of_epoch. How many epoch you want to train?
     number_of_epoch = 8
 
-    latent_space_size = 100
+    latent_space_size = 1000
 
     encoder_input, encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder(number_of_output_neurons=latent_space_size)
     encoder_model = Model(encoder_input, [mean_mu, log_var, encoder_output], name = "encoder")
@@ -162,21 +162,13 @@ def train():
     vae_output = decoder_model(encoder_model(encoder_input)[2])
     vae_model = Model(encoder_input, vae_output)
     #vae_model.summary()
-    reconstruction_loss = binary_crossentropy(encoder_input,
-                                              vae_output)
+
 
     #encoder_model.compile(optimizer=Adam(lr = 0.001), loss = 'binary_crossentropy')
     #tf.keras.utils.plot_model(encoder_model, to_file='encoder.png', show_shapes=True, show_layer_names=True)
 
     #decoder_model.compile(optimizer=Adam(lr=0.001), loss='binary_crossentropy')
     #tf.keras.utils.plot_model(decoder_model, to_file='decoder.png', show_shapes=True, show_layer_names=True)
-
-    reconstruction_loss *= LOSS_FACTOR
-    kl_loss = 1 + log_var - K.square(mean_mu) - K.exp(log_var)
-    kl_loss = K.sum(kl_loss, axis=-1)
-    kl_loss *= -0.5
-    vae_loss = K.mean(reconstruction_loss + kl_loss)
-    #vae_model.add_loss(vae_loss)
 
     def kl_reconstruction_loss(true, pred):
         # Reconstruction loss
@@ -188,9 +180,9 @@ def train():
         # Total loss = 50% rec + 50% KL divergence loss
         return K.mean(reconstruction_loss + kl_loss)
 
-    vae_model.compile(optimizer=Adam(), loss = kl_reconstruction_loss)
+    vae_model.compile(optimizer=Adam(), loss = kl_reconstruction_loss, metrics=kl_reconstruction_loss)
 
-    #tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
+    tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
     #https://github.com/AppliedDataSciencePartners/DeepReinforcementLearning/issues/3
 
     # Where is your data?
