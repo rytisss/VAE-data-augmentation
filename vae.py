@@ -52,7 +52,7 @@ def sampling(args):
 # Encoder
 # Returns flattened encoder data and tensor shape before flattening
 def encoder(input_size = (320, 320, 1),
-            number_of_kernels = 16,
+            number_of_kernels = 8,
             kernel_size = 3,
             stride = 1,
             number_of_output_neurons = 2000,
@@ -81,7 +81,7 @@ def encoder(input_size = (320, 320, 1),
     reduces_assp_flatten = Flatten()(reduced_assp) #in case of input 320x320 with 16 kernels, here should be 25600
 
     # Define model output, reduce output dimensions
-    reduces_assp_flatten = Dense(number_of_output_neurons)(reduces_assp_flatten)
+    reduces_assp_flatten = Dense(number_of_output_neurons, activation='relu')(reduces_assp_flatten)
 
     mean_mu = Dense(number_of_output_neurons, name='mu')(reduces_assp_flatten)
     log_var = Dense(number_of_output_neurons, name='log_var')(reduces_assp_flatten)
@@ -91,11 +91,11 @@ def encoder(input_size = (320, 320, 1),
     return encoder_input, encoder_output, mean_mu, log_var, shape_before_flattening
 
 
-def decoder(input = 2000, input_shape_before_flatten = (40, 40, 16), number_of_kernels = 16, batch_norm = True, kernel_size = 3):
+def decoder(input = 2000, input_shape_before_flatten = (40, 40, 8), number_of_kernels = 8, batch_norm = True, kernel_size = 3):
     # Define model input
     decoder_input = Input(shape=(input,), name='decoder_input')
 
-    x = Dense(np.prod(input_shape_before_flatten))(decoder_input)
+    x = Dense(np.prod(input_shape_before_flatten), activation='relu')(decoder_input)
     x = Reshape(input_shape_before_flatten)(x)
 
     #increase feature count with 1x1 convolution
@@ -148,17 +148,20 @@ def train():
     # batch size. How many samples you want to feed in one iteration?
     batch_size = 1
     # number_of_epoch. How many epoch you want to train?
-    number_of_epoch = 16
+    number_of_epoch = 8
 
-    encoder_input, encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder()
+    latent_space_size = 100
+
+    encoder_input, encoder_output, mean_mu, log_var, vae_shape_before_flattening = encoder(number_of_output_neurons=latent_space_size)
     encoder_model = Model(encoder_input, [mean_mu, log_var, encoder_output], name = "encoder")
-    decoder_input, decoder_output = decoder()
+    #encoder_model.summary()
+    decoder_input, decoder_output = decoder(input=latent_space_size, input_shape_before_flatten=vae_shape_before_flattening)
     decoder_model = Model(decoder_input, decoder_output)
-
+    #decoder_model.summary()
     # define full vae
-    vae_output = decoder_model(encoder_model(encoder_input))
+    vae_output = decoder_model(encoder_model(encoder_input)[2])
     vae_model = Model(encoder_input, vae_output)
-
+    #vae_model.summary()
     reconstruction_loss = binary_crossentropy(encoder_input,
                                               vae_output)
 
@@ -173,8 +176,19 @@ def train():
     kl_loss = K.sum(kl_loss, axis=-1)
     kl_loss *= -0.5
     vae_loss = K.mean(reconstruction_loss + kl_loss)
-    vae_model.add_loss(vae_loss)
-    vae_model.compile(optimizer=Adam(lr = 1.0))
+    #vae_model.add_loss(vae_loss)
+
+    def kl_reconstruction_loss(true, pred):
+        # Reconstruction loss
+        reconstruction_loss = binary_crossentropy(K.flatten(true), K.flatten(pred)) * 320 * 320
+        # KL divergence loss
+        kl_loss = 1 + log_var - K.square(mean_mu) - K.exp(log_var)
+        kl_loss = K.sum(kl_loss, axis=-1)
+        kl_loss *= -0.5
+        # Total loss = 50% rec + 50% KL divergence loss
+        return K.mean(reconstruction_loss + kl_loss)
+
+    vae_model.compile(optimizer=Adam(), loss = kl_reconstruction_loss)
 
     #tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
     #https://github.com/AppliedDataSciencePartners/DeepReinforcementLearning/issues/3
