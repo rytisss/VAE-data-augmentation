@@ -21,7 +21,7 @@ from keras.losses import mse, binary_crossentropy
 from keras.utils import plot_model
 
 # Directory for weight saving (creates if it does not exist)
-weights_output_dir = r'D:\drilled holes data for training\UNet4_res_assp_5x5_16k_320x320_coordConv_v2/'
+weights_output_dir = r'C:\Users\prorega\Downloads\holesTrain/'
 weights_output_name = 'UNet4_res_assp_5x5_16k_320x320'
 
 # https://www.machinecurve.com/index.php/2019/12/30/how-to-create-a-variational-autoencoder-with-keras/
@@ -41,12 +41,12 @@ def sampling(args):
         z (tensor): sampled latent vector
     """
 
-    z_mean, z_log_var = args
-    batch = K.shape(z_mean)[0]
-    dim = K.int_shape(z_mean)[1]
+    mu_mean, z_log_var = args
+    batch = K.shape(mu_mean)[0]
+    dim = K.int_shape(mu_mean)[1]
     # by default, random_normal has mean = 0 and std = 1.0
     epsilon = K.random_normal(shape=(batch, dim))
-    return z_mean + K.exp(0.5 * z_log_var) * epsilon
+    return mu_mean + K.exp(0.5 * z_log_var) * epsilon
 
 
 # Encoder
@@ -119,8 +119,6 @@ def decoder(input = 2000, input_shape_before_flatten = (40, 40, 8), number_of_ke
 
     return decoder_input, decoder_output
 
-def r_loss(y_true, y_pred):
-    return K.mean(K.square(y_true - y_pred), axis = [1,2,3])
 
 class CustomSaver(tf.keras.callbacks.Callback):
     def __init__(self):
@@ -174,21 +172,25 @@ def train():
         # Reconstruction loss
         reconstruction_loss = binary_crossentropy(K.flatten(true), K.flatten(pred)) * 320 * 320
         # KL divergence loss
-        kl_loss = 1 + log_var - K.square(mean_mu) - K.exp(log_var)
+        kl_loss = 1 + log_var - tf.square(mean_mu) - tf.exp(log_var)
         kl_loss = K.sum(kl_loss, axis=-1)
         kl_loss *= -0.5
         # Total loss = 50% rec + 50% KL divergence loss
-        return K.mean(reconstruction_loss + kl_loss)
+        mean = K.mean(reconstruction_loss + kl_loss)
+        print(reconstruction_loss)
+        print(kl_loss)
+        #print(mean)
+        return mean
 
-    vae_model.compile(optimizer=Adam(), loss = kl_reconstruction_loss, metrics=kl_reconstruction_loss)
+    vae_model.compile(optimizer=Adam(), loss = kl_reconstruction_loss, metrics=[kl_reconstruction_loss])
 
-    tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
+    #tf.keras.utils.plot_model(vae_model, to_file='UNet4.png', show_shapes=True, show_layer_names=True)
     #https://github.com/AppliedDataSciencePartners/DeepReinforcementLearning/issues/3
 
     # Where is your data?
     # This path should point to directory with folders 'Images' and 'Labels'
     # In each of mentioned folders should be image and annotations respectively
-    data_dir = r'D:\holesTrain_/'
+    data_dir = r'C:\Users\prorega\Downloads\holesTrain/'
     image_folder = 'Image_rois'
 
     # Possible 'on-the-flight' augmentation parameters
